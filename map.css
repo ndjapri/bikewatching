@@ -23,9 +23,80 @@ html, body {
 }
 
 #map svg circle {
-    fill: steelblue;
-    fill-opacity: 0.6;
     stroke: white;
     stroke-width: 1px;
     pointer-events: auto;
+    --color-departures: steelblue;
+    --color-arrivals: darkorange;
+
+    --color: color-mix(
+        in oklch,
+        var(--color-departures) calc(100% * var(--departure-ratio)),
+        var(--color-arrivals)
+    );
+
+    fill: var(--color);
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    gap: 1em;
+}
+
+header label {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+#time-slider {
+    width: 250px;
+}
+
+#selected-time,
+#any-time {
+    display: block;
+    width: 100%;
+    text-align: right;
+}
+
+#any-time {
+    color: gray;
+    font-style: italic;
+}
+
+.legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 16px;
+    font-size: 14px;
+}
+
+.legend > div {
+    --color-departures: steelblue;
+    --color-arrivals: darkorange;
+
+    --color: color-mix(
+        in oklch,
+        var(--color-departures) calc(100% * var(--departure-ratio)),
+        var(--color-arrivals)
+    );
+
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend > div::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color);
 }

@@ -20,6 +20,60 @@ function getCoords(station) {
     return { cx: x, cy: y };
 }
 
+function computeStationTraffic(stations, trips) {
+    const departures = d3.rollup(
+        trips,
+        v => v.length,
+        d => d.start_station_id
+    );
+
+    const arrivals = d3.rollup(
+        trips,
+        v => v.length,
+        d => d.end_station_id
+    );
+
+    return stations.map(station => {
+        const id = station.short_name;
+
+        station.arrivals = arrivals.get(id) ?? 0;
+        station.departures = departures.get(id) ?? 0;
+        station.totalTraffic = station.arrivals + station.departures;
+
+        return station;
+    });
+}
+
+function minutesSinceMidnight(date) {
+    return date.getHours() * 60 + date.getMinutes();
+}
+
+function filterTripsByTime(trips, timeFilter) {
+    if (timeFilter === -1) {
+        return trips;
+    }
+
+    function withinOneHour(minutes) {
+        const diff = Math.abs(minutes - timeFilter);
+        return Math.min(diff, 1440 - diff) <= 60;
+    }
+
+    return trips.filter(trip => {
+        const startedMinutes = minutesSinceMidnight(trip.started_at);
+        const endedMinutes = minutesSinceMidnight(trip.ended_at);
+
+        return (
+            withinOneHour(startedMinutes) ||
+            withinOneHour(endedMinutes)
+        );
+    });
+}
+
+function formatTime(minutes) {
+    const date = new Date(0, 0, 0, 0, minutes);
+    return date.toLocaleString('en-US', { timeStyle: 'short' });
+}
+
 map.on('load', async () => {
     map.addSource('boston_route', {
       type: 'geojson',
@@ -64,32 +118,16 @@ map.on('load', async () => {
         console.log('Stations Array:', stations);
 
         // Load Bluebikes traffic data
-        const trips = await d3.csv('https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv');
-
-        // Calculate departures
-        const departures = d3.rollup(
-            trips,
-            v => v.length,
-            d => d.start_station_id
+        const trips = await d3.csv(
+            'https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv',
+            trip => {
+                trip.started_at = new Date(trip.started_at);
+                trip.ended_at = new Date(trip.ended_at);
+                return trip;
+            }
         );
 
-        // Calculate arrivals
-        const arrivals = d3.rollup(
-            trips,
-            v => v.length,
-            d => d.end_station_id
-        );
-
-        // Add traffic counts to each station
-        stations = stations.map(station => {
-            const id = station.short_name;
-
-            station.arrivals = arrivals.get(id) ?? 0;
-            station.departures = departures.get(id) ?? 0;
-            station.totalTraffic = station.arrivals + station.departures;
-
-            return station;
-        });
+        stations = computeStationTraffic(stations, trips);
 
         console.log('Stations with traffic:', stations);
 
@@ -98,10 +136,14 @@ map.on('load', async () => {
             .domain([0, d3.max(stations, d => d.totalTraffic)])
             .range([0, 25]);
 
+        const stationFlow = d3.scaleQuantize()
+            .domain([0, 1])
+            .range([0, 0.5, 1]);
+
         // Draw circles for each station
         const circles = svg
             .selectAll('circle')
-            .data(stations)
+            .data(stations, d => d.short_name)
             .enter()
             .append('circle')
             .attr('r', d => radiusScale(d.totalTraffic))
@@ -113,7 +155,12 @@ map.on('load', async () => {
                 d3.select(this)
                     .append('title')
                     .text(`${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`);
-            });
+            })
+            .style('--departure-ratio', d =>
+                stationFlow(d.totalTraffic > 0
+                    ? d.departures / d.totalTraffic
+                    : 0.5)
+            );
 
         // Position circles on the map
         function updatePositions() {
@@ -129,6 +176,54 @@ map.on('load', async () => {
         map.on('zoom', updatePositions);
         map.on('resize', updatePositions);
         map.on('moveend', updatePositions);
+
+        function updateScatterPlot(timeFilter) {
+            // Filter trips based on selected time
+            const filteredTrips = filterTripsByTime(trips, timeFilter);
+        
+            // Recalculate traffic at each station
+            const filteredStations = computeStationTraffic(stations, filteredTrips);
+
+            // Adjust circle sizes depending on filtering
+            timeFilter === -1
+                ? radiusScale.range([0, 25])
+                : radiusScale.range([3, 50]);
+        
+            // Change circle sizes
+            circles
+                .data(filteredStations, d => d.short_name)
+                .attr('r', d => radiusScale(d.totalTraffic))
+                .style('--departure-ratio', d =>
+                    stationFlow(d.totalTraffic > 0
+                        ? d.departures / d.totalTraffic
+                        : 0.5)
+                )
+                .select('title')
+                .text(d =>
+                    `${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`
+                );
+        }
+
+        // Time slider elements
+        const timeSlider = document.getElementById('time-slider');
+        const selectedTime = document.getElementById('selected-time');
+        const anyTimeLabel = document.getElementById('any-time');
+
+        function updateTimeDisplay() {
+            const timeFilter = Number(timeSlider.value);
+
+            if (timeFilter === -1) {
+                selectedTime.textContent = '';
+                anyTimeLabel.style.display = 'block';
+            } else {
+                selectedTime.textContent = formatTime(timeFilter);
+                anyTimeLabel.style.display = 'none';
+            }
+            updateScatterPlot(timeFilter);
+        }
+
+        timeSlider.addEventListener('input', updateTimeDisplay);
+        updateTimeDisplay();
 
     } catch (error) {
         console.error('Error loading JSON:', error);
